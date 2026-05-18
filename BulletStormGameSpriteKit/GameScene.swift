@@ -8,6 +8,7 @@
 import SpriteKit
 import AVFoundation
 import SwiftUI //only needed for preview
+import SwiftData
 
 class GameScene: SKScene, SKPhysicsContactDelegate {
     let player = SKSpriteNode(imageNamed: "ship")
@@ -27,6 +28,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     var powerUpTimer: Timer?
     var enemySpeedModifier: CGFloat = 1.0
     var gameTimeModifier: Double = 1.0
+    
+    @Environment(\.modelContext) private var modelContext
+    @Query private var settings: [GameSettings]
     
     func applyPowerUp(_ powerUp: PowerUp) {
         if let collectedEffect = SKEffectNode(fileNamed: "PowerUpEffect.sks") {
@@ -125,26 +129,40 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         physicsWorld.contactDelegate = self //enables the collision detection
         
+        if settings.isEmpty {
+            let newSettings = GameSettings()
+            modelContext.insert(newSettings)
+            try? modelContext.save()
+        }
+        
         SoundManager.shared.playBackgroundMusic(fileName: "game_music")
     }
     
-    func setupBackground() {
-        background.size = self.size
-        background.position = CGPoint(x: size.width / 2, y: size.height / 2) //center
-        background.zPosition = -1
-        addChild(background)
-    }
+    // Sets up the background sprite
+     func setupBackground() {
+         background.size = self.size // Match scene size
+         background.position = CGPoint(x: size.width / 2, y: size.height / 2) // Center the background
+         background.zPosition = -1 // Place behind all other elements
+         addChild(background)
+     }
+     
+     // Sets up the player sprite and physics properties
+     func setupPlayer() {
+         let selectedColor = UserDefaults.standard.string(forKey: "selectedShipColor") ?? "red" // Default to red
+
+         let shipImageName = "ship_\(selectedColor)"
+         player.texture = SKTexture(imageNamed: shipImageName) // Load correct ship texture
+
+         player.position = CGPoint(x: size.width / 2, y: 120)
+         player.size = CGSize(width: 40, height: 40)
+
+         player.physicsBody = SKPhysicsBody(circleOfRadius: 20)
+         player.physicsBody?.isDynamic = false
+         player.physicsBody?.categoryBitMask = 1
+         player.physicsBody?.contactTestBitMask = PhysicsCategory.enemy | PhysicsCategory.powerUp
+         addChild(player)
+     }
     
-    func setupPlayer() {
-        player.position = CGPoint(x: size.width / 2, y: 120) //place us at the bottom
-        player.size = CGSize(width: 40, height: 40)
-        
-        player.physicsBody = SKPhysicsBody(circleOfRadius: 20)
-        player.physicsBody?.isDynamic = false //disables the gravity
-        player.physicsBody?.categoryBitMask = 1 //assign category bit masks to your player and enemies to trigger collision events effeciently
-        player.physicsBody?.contactTestBitMask = PhysicsCategory.enemy | PhysicsCategory.powerUp
-        addChild(player)
-    }
     
     func setupUI() {
         scoreLabel.position = CGPoint(x: size.width / 2, y: size.height - 80)
@@ -259,7 +277,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
                 (firstBody.categoryBitMask == PhysicsCategory.enemy && secondBody.categoryBitMask == PhysicsCategory.player) {
                 
                 if shieldActive {
-                    print("🛡 Shield absorbed the hit!") // Debug log message
+                    print("Shield absorbed the hit!") // Debug log message
                     shieldActive = false // Deactivate shield
                     
                     // Remove the shield visual effect
@@ -395,13 +413,28 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         startGame()
     }
     
+    func saveScore(_ newScore: Int) {
+        let defaults = UserDefaults.standard
+        var highScores = defaults.array(forKey: "highScores") as? [Int] ?? []
+        
+        highScores.append(newScore)
+        highScores.sort(by: >)
+        
+        if highScores.count > 5 {
+            highScores = Array(highScores.prefix(5))
+        }
+        defaults.set(highScores, forKey: "highScores")
+    }
+    
     // Displays the game over screen with a black overlay, final score, and action buttons
        func showGameOverScreen() {
            // Stop all game logic
            gameTimer?.invalidate()
            scoreTimer?.invalidate()
            powerUpTimer?.invalidate()
-           SoundManager.shared.stopBackgroundMusic() // ✅ Stop music on game over
+           SoundManager.shared.stopBackgroundMusic() // Stop music on game over
+           
+           saveScore(score)
            
            // Create a black semi-transparent overlay
            let overlay = SKSpriteNode(color: UIColor.black.withAlphaComponent(0.6), size: self.size)
@@ -446,6 +479,20 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
            menuButton.zPosition = 11
            menuButton.name = "mainMenuButton" // Assign a name for touch detection
            addChild(menuButton)
+           
+           let defaults = UserDefaults.standard
+           var highScores = defaults.array(forKey: "highScores") as? [Int] ?? []
+           
+           for(index, score) in highScores.enumerated(){
+               let scoreLabel = SKLabelNode(fontNamed: "AevnirNext-Bold")
+               scoreLabel.text = "\(index + 1). \(score) seconds ⏰"
+               scoreLabel.fontSize = 24
+               scoreLabel.fontColor = .white
+               scoreLabel.zPosition = 11
+               
+               scoreLabel.position = CGPoint(x: self.size.width / 2, y: self.size.height / 2 - 80 - CGFloat(index * 30))
+               addChild(scoreLabel)
+           }
        }
     
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
